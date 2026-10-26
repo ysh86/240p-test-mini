@@ -214,12 +214,23 @@ done:
   rts
 .endproc
 
+.ifdef USE_FDS
+; See unpb53.s: FDS reserves $0100-$0103 for the BIOS; the whole
+; scratch cluster moves to the $0700 page, layout preserved.
+wallbits_L = $0700
+wallbits_R = $0720
+pathbits_L = $0740
+pathbits_R = $0760
+mt_row = $0780
+attrbuf = $0790
+.else
 wallbits_L = $0100
 wallbits_R = $0120
 pathbits_L = $0140
 pathbits_R = $0160
 mt_row = $0180
 attrbuf = $0190
+.endif
 
 .proc load_kiki_map_02
 mtdstlo = $00

@@ -140,6 +140,14 @@ clean:
 
 objlisto := $(foreach o,$(objlist),$(objdir)/$(o).o)
 objlistmmco := $(foreach o,$(objlist),$(objdir)/$(o)-mmc.o)
+# FDS variants of the files whose scratch buffers sit on the $0100
+# stack page: on FDS, $0100-$0103 belong to the BIOS (NMI routing,
+# transfer state, reset dispatch), so those buffers move to $0700
+# under USE_FDS (see src/unpb53.s).  The FDS link uses these objects
+# in place of the corresponding -mmc objects.
+fdsbufobjs := unpb53 vwf_draw rectfill kiki mdfourier padstest
+objlistfdso := $(objlistmmco)
+$(foreach f,$(fdsbufobjs),$(eval objlistfdso := $(subst $(objdir)/$(f)-mmc.o,$(objdir)/$(f)-fds.o,$(objlistfdso))))
 objlistnsfo := $(foreach o,$(objlistnsf),$(objdir)/$(o).o)
 objlistmdf4ko := $(foreach o,$(objlistmdf4k),$(objdir)/$(o).o)
 objlistmdf4kchro := $(foreach o,$(objlistmdf4kchr),$(objdir)/$(o).o)
@@ -157,6 +165,10 @@ bnmap.txt $(title)-bnrom.nes: bnrom512kbit.cfg $(objlisto) $(objdir)/bnrom.o
 sgmap.txt $(title)-sgrom.nes: sgrom512kbit.cfg $(objlistmmco) $(objdir)/mmc1.o
 	$(LD65) -o $(title)-sgrom.nes -m sgmap.txt --dbgfile $(title)-sgrom.dbg -C $^
 	$(FIX) $(title)-sgrom.nes
+
+fdsmap.txt $(title)-fds.fds: fds.cfg $(objlistfdso) $(objdir)/fds.o
+	$(LD65) -o /dev/null -m fdsmap.txt --dbgfile $(title)-fds.dbg -C fds.cfg $(objlistfdso) $(objdir)/fds.o
+	$(PY) tools/make_fds_image.py
 
 tgmap.txt $(title)-tgrom.nes: tgrom512kbit.cfg $(objlistmmco) $(objdir)/mmc3.o
 	$(LD65) -o $(title)-tgrom.nes -m tgmap.txt --dbgfile $(title)-tgrom.dbg -C $^
@@ -183,6 +195,9 @@ nsfmap.txt mdfourier.nsf: nsf.cfg $(objlistnsfo)
 
 $(objdir)/%-mmc.o: $(srcdir)/%.s $(srcdir)/nes.inc $(srcdir)/global.inc $(objdir)/%.o
 	$(AS65) $(CFLAGS65) $< -DUSE_MMC=1 -o $@
+
+$(objdir)/%-fds.o: $(srcdir)/%.s $(srcdir)/nes.inc $(srcdir)/global.inc $(objdir)/%.o
+	$(AS65) $(CFLAGS65) $< -DUSE_MMC=1 -DUSE_FDS=1 -o $@
 
 $(objdir)/%.o: $(srcdir)/%.s $(srcdir)/nes.inc $(srcdir)/global.inc
 	$(AS65) $(CFLAGS65) $< -o $@

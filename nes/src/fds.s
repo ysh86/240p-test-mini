@@ -5,8 +5,11 @@
 ; switchable 16K bank lives in PRG RAM at $6000-$9FFF and switching
 ; banks loads the corresponding file from disk with LoadFiles
 ; ($E1F8).  The fixed bank lives at $A000-$DFFF.  CHR is RAM, as on
-; the SGROM build, and nametable arrangement stays at the BIOS reset
-; default ($4025 = $2E: vertical mirroring), as on the UNROM build.
+; the SGROM build.  Nametable arrangement does NOT stay at the BIOS
+; reset default: the BIOS leaves $4025 = $2E (bit 3 set = vertical
+; arrangement, i.e. "horizontal mirroring" in cartridge terms), but
+; every mapper build of the suite selects vertical mirroring, so
+; fds_boot writes the resting value with bit 3 cleared (see there).
 ;
 ; Exports the same contract as mmc1.s/mmc3.s so the shared code
 ; (assembled with USE_MMC=1) links unchanged.  Register contract of
@@ -20,8 +23,9 @@
 .import unpb53_some, unpb53_file_cb, load_sb53_file_cb, load_iu53_file_cb
 .export unpb53_gate, unpb53_file, load_sb53_file, load_iu53_file
 .import rf_vwfClearPuts_cb, rf_load_layout_cb
+.import unpb53_shadow_loop
 .export rf_vwfClearPuts, rf_load_layout
-.export rtl, mmc_bank_a
+.export rtl, mmc_bank_a, unpb53_shadow_batch
 .export fds_boot, nmi_handler, irq_handler
 
 MAIN_CODE_BANK = $02
@@ -77,21 +81,40 @@ fds_boot:
   sta $0102  ; RESET flag: boot files have loaded
   lda #$AC
   sta $0103  ; RESET type: first boot
-  ; Cycle the motor (stop, wait, start) like DupliFDS does before
-  ; its disk work: after the hijack interrupted the boot mid-skip
-  ; this leaves the drive in a known, freshly-rewound state
-  ; before the game starts asking the BIOS for loads.
-  lda #$2E  ; $4025: read mode, motor off
+  ; Park the drive in its resting state and set the nametable
+  ; arrangement, with the BIOS reset stub's own value: the stub
+  ; writes $FA = $4025 = $2E before dispatching to the game on a
+  ; warm reset; $26 is that value with bit 3 cleared (horizontal
+  ; arrangement = "vertical mirroring"), which is what mmc1.s /
+  ; mmc3.s select at init and what the suite's scroll tests are
+  ; built for (SMB2 likewise clears bit 3 of the stub's value at
+  ; its entry).  On the warm path this merely re-states the stub's
+  ; state with bit 3 adjusted.  On the cold path it matters more:
+  ; the bypass entry interrupts the boot mid-skip with the drive
+  ; still streaming, and on Hara's FDSKey the first runtime load
+  ; after such an entry never syncs (the disk spins forever),
+  ; while every warm boot -- which passes through the stub's stop
+  ; write and the firmware's rewind-to-zero reaction to it --
+  ; works.  Writing the resting value here gives the cold entry
+  ; the same drive state the stub gives a warm one.  This is a
+  ; single state write at entry, not a stop/start cycle: the
+  ; motor is started later by LoadFiles itself, exactly as after
+  ; a warm reset.  LoadFiles derives its $4025 values from $FA
+  ; with bit 3 included in its masks, so the arrangement setting
+  ; survives every later disk call.
+  lda #$26
+  sta $FA
   sta $4025
-  ldx #0
-  ldy #0
-@rewind_wait:
-  dex
-  bne @rewind_wait
-  dey
-  bne @rewind_wait  ; ~0.2 s for the motor to stop
-  lda #$2D  ; $4025: read mode, motor on
-  sta $4025
+  ; And no motor cycling anywhere.  Earlier builds cycled the
+  ; motor (stop, ~0.2 s, start) at boot and before every LoadFiles
+  ; attempt; those builds all failed their first runtime load on
+  ; hardware (v5-v9), though in hindsight they also lacked the
+  ; reserved-area hygiene, so the cycle was never cleanly
+  ; isolated as the cause.  What is certain from the commercial
+  ; reference: SMB2's only $4025 write is a single bit-3 mirror
+  ; RMW at entry, the motor is otherwise left to the BIOS and the
+  ; drive, and per-attempt drive manipulation has no commercial
+  ; precedent; see SMB2-LOADER-ANALYSIS.md.
   ; The boot vector file pointed NMI #3 at this entry so the bypass
   ; could reach it.  Repoint all NMI slots at the real handler now.
   lda #<nmi_handler
@@ -118,7 +141,9 @@ rtl:
   ; fall through to mmc_bank_a
 mmc_bank_a:
   cmp cur_bank
-  beq @done
+  bne @go
+  rts
+@go:
   sta bank_want
   txa
   pha
@@ -137,12 +162,19 @@ mmc_bank_a:
   lda #$00
   sta $4010
   ; PPUCTRL for the transfer (via the $FF mirror that VINTWait
-  ; applies): NMI off, VRAM increment +1.  The mirror cannot be
-  ; trusted to hold the program's value -- reset_handler clears the
-  ; whole zero page, this program included, and it never maintains
-  ; the BIOS mirrors -- so set it explicitly.
+  ; applies): NMI off, VRAM increment +1.  $FF is the game's own
+  ; PPUCTRL mirror, shared with the BIOS by design, so setting it
+  ; here is the documented pre-LoadFiles protocol, not a repair.
   lda #$00
   sta $FF
+  ; No mirror repairs here.  Earlier builds rewrote $FA ($4025
+  ; shadow) and $F9 ($4026 mirror) per attempt because
+  ; reset_handler's zero-page clear destroyed the values the BIOS
+  ; reset seeded.  The reserved-area hygiene in init.s/fds.cfg
+  ; (the game never writes $00-$0F or $F1-$FF at all) makes that
+  ; unnecessary: BIOS state now survives from reset through the
+  ; boot load into the game, as on a commercial FDS title, and
+  ; LoadFiles maintains its own mirrors from there.
   jsr VINTWAIT  ; sync to vblank; applies $FF to $2000; leaves I set
   ; One-entry file list for the wanted bank's file ID.
   ldx bank_want
@@ -150,6 +182,12 @@ mmc_bank_a:
   sta filelist
   lda #$FF
   sta filelist+1
+  ; Just call, the way the commercial reference does: no motor
+  ; stop/start, no drive-state manipulation before the call
+  ; (SMB2's loader reaches its JSR $E1F8 with nothing but the
+  ; file-list pointer patched).  The BIOS scans forward from
+  ; wherever the head is, exactly as it does for a commercial
+  ; title whose disk has been spinning since boot.
   cli  ; the BIOS transfer is IRQ-driven
   jsr LOADFILES
   .addr disk_id
@@ -220,6 +258,22 @@ rf_load_layout:
   jsr mmc_bank_a
   pla
   jsr rf_load_layout_cb
+  jmp rtl
+
+; Batched gate for the drop shadow test's tile loop: upstream calls
+; unpb53_gate once per 4-tile block (28 round trips for that test's
+; entry), and each round trip here is two disk loads.  Worse, the
+; loop's block counter lives at $02, inside the BIOS LoadFiles work
+; area ($00-$0E), so with the real BIOS each load rewrites the
+; counter and the loop cannot be trusted to terminate.  The FDS
+; variant of the loop therefore runs entirely inside ONE gate
+; session: switch to the data bank, decode/transform/copy all
+; blocks (the loop in shadowsprite.s touches only PB53_outbuf and
+; $2007 while gated), switch back once.
+unpb53_shadow_batch:
+  lda #GATE_DATA_BANK
+  jsr mmc_bank_a
+  jsr unpb53_shadow_loop
   jmp rtl
 
 nmi_handler:

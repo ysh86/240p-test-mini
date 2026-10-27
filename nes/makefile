@@ -143,9 +143,11 @@ objlistmmco := $(foreach o,$(objlist),$(objdir)/$(o)-mmc.o)
 # FDS variants of the files whose scratch buffers sit on the $0100
 # stack page: on FDS, $0100-$0103 belong to the BIOS (NMI routing,
 # transfer state, reset dispatch), so those buffers move to $0700
-# under USE_FDS (see src/unpb53.s).  The FDS link uses these objects
-# in place of the corresponding -mmc objects.
-fdsbufobjs := unpb53 vwf_draw rectfill kiki mdfourier padstest
+# under USE_FDS (see src/unpb53.s).  init is included for a
+# different USE_FDS guard: its zero-page clear must skip the BIOS
+# areas ($00-$0F disk work, $F1-$FF mirrors).  The FDS link uses
+# these objects in place of the corresponding -mmc objects.
+fdsbufobjs := unpb53 vwf_draw rectfill kiki mdfourier padstest init shadowsprite
 objlistfdso := $(objlistmmco)
 $(foreach f,$(fdsbufobjs),$(eval objlistfdso := $(subst $(objdir)/$(f)-mmc.o,$(objdir)/$(f)-fds.o,$(objlistfdso))))
 objlistnsfo := $(foreach o,$(objlistnsf),$(objdir)/$(o).o)

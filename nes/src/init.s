@@ -45,11 +45,28 @@ vwait1:
   ldx #0
   jsr ppu_clear_oam  ; clear out OAM from X to end and set X to 0
 
+.ifdef ::USE_FDS
+  ; FDS: the BIOS owns zero page $00-$0F (LoadFiles work area) and
+  ; $F1-$FF (controller state and the $4026/$4025/$4016/$2005/
+  ; $2001/$2000 mirrors), seeded by the BIOS reset handler before
+  ; the boot load.  Clear only the game's own ZP range ($10-$F0,
+  ; matching fds.cfg) so that BIOS state survives into the game;
+  ; the FDS backend relies on it instead of repairing individual
+  ; mirror bytes before every disk call.
+  ldx #$10
+  lda #$00
+clear_zp:
+  sta $00,x
+  inx
+  cpx #$F1
+  bne clear_zp
+.else
   txa
 clear_zp:
   sta $00,x
   inx
   bne clear_zp
+.endif
   
   ; Other things that can be done here (not shown):
   ; Set up PRG RAM

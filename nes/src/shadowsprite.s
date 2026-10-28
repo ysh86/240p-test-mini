@@ -429,15 +429,20 @@ have_fullscreentilepat:
   sta ciSrc+1
 tiles_left = 2
 
-  stx tiles_left
 .ifdef USE_FDS
   ; On FDS each unpb53_gate call is two disk loads, and tiles_left
   ; sits in the BIOS LoadFiles work area ($00-$0E), which the real
   ; BIOS rewrites on every load -- the per-block gate loop below
   ; cannot be trusted to terminate there.  The FDS backend instead
   ; runs the whole loop inside one gate session (see fds.s).
+  ; The block count cannot cross the session's gate-in load in
+  ; tiles_left (BIOS work area) or in a register (LoadFiles eats
+  ; them all), so it crosses in BSS; unpb53_shadow_loop picks it
+  ; up after the load.
+  stx shadow_batch_count
   jmp unpb53_shadow_batch
 .else
+  stx tiles_left
   ldx #0
   stx ciBufStart
   ldx #16
@@ -496,8 +501,14 @@ copyloop:
 ; FDS backend inside a single gate session (see fds.s).  Identical
 ; to the cartridge loop except it calls unpb53_some directly: the
 ; data bank is already switched in for the whole loop.
+.segment "BSS"
+shadow_batch_count: .res 1
+.segment "CODE"
+
 .proc unpb53_shadow_loop
 tiles_left = 2
+  lda shadow_batch_count
+  sta tiles_left
   ldx #0
   stx ciBufStart
   ldx #16

@@ -26,8 +26,15 @@ test_subtype     = test_state+4
 test_lastpulsehi = test_state+5
 test_good_phase  = test_state+6
 
+.ifdef USE_FDS
+; See unpb53.s: FDS reserves $0100-$0103 for the BIOS; scratch page
+; moves to $0700.
+apu_addressbuf = $0700
+apu_databuf    = $0720
+.else
 apu_addressbuf = $0100
 apu_databuf    = $0120
+.endif
 
 .code
 .align 32

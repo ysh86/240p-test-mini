@@ -149,7 +149,13 @@ colinc      = $07
 ; H: height (16px)
 ; A: attribute value
 
+.ifdef USE_FDS
+; See unpb53.s: FDS reserves $0100-$0103 for the BIOS; scratch page
+; moves to $0700.
+attrbuf = $0700
+.else
 attrbuf = $0100
+.endif
 
 .proc rf_draw_attrs
 dstaddr   = $00

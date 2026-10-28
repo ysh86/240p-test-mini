@@ -22,7 +22,13 @@
 .exportzp lineImgBufLen
 .import vwfChrData, vwfChrWidths
 
+.ifdef USE_FDS
+; See unpb53.s: FDS reserves $0100-$0103 for the BIOS; scratch page
+; moves to $0700.
+lineImgBuf = $0700
+.else
 lineImgBuf = $0100
+.endif
 lineImgBufLen = 128
 FONT_HT = 8
 

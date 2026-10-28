@@ -20,7 +20,14 @@ ciSrc: .res 2
 ciDst: .res 2
 ciBufStart: .res 1
 ciBufEnd: .res 1
+.ifdef USE_FDS
+; On FDS, $0100-$0103 are BIOS system bytes (NMI routing mode,
+; transfer state, reset dispatch flags) and must not be overwritten.
+; The scratch page moves to $0700 (free: BSS ends at $063C).
+PB53_outbuf = $0700
+.else
 PB53_outbuf = $0100
+.endif
 
 .segment "PB53CODE"
 .proc unpb53_some

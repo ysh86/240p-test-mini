@@ -45,7 +45,13 @@ NUM_PORTS = 2
 BITS_PER_PORT = 5
 LA_NUM_CHANNELS = NUM_PORTS * BITS_PER_PORT
 
+.ifdef USE_FDS
+; See unpb53.s: FDS reserves $0100-$0103 for the BIOS; scratch page
+; moves to $0700.  (MOUSE_PEAK_CHR_DST stays: it is a VRAM address.)
+serial_read_data0 = $0700
+.else
 serial_read_data0 = $0100
+.endif
 serial_read_data1 = serial_read_data0 + NUM_READS
 serial_disp_data = OAM
 SIZEOF_SERIAL_DISP_DATA = NUM_READS / 2 * LA_NUM_CHANNELS

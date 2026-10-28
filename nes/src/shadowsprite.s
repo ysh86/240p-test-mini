@@ -429,6 +429,19 @@ have_fullscreentilepat:
   sta ciSrc+1
 tiles_left = 2
 
+.ifdef USE_FDS
+  ; On FDS each unpb53_gate call is two disk loads, and tiles_left
+  ; sits in the BIOS LoadFiles work area ($00-$0E), which the real
+  ; BIOS rewrites on every load -- the per-block gate loop below
+  ; cannot be trusted to terminate there.  The FDS backend instead
+  ; runs the whole loop inside one gate session (see fds.s).
+  ; The block count cannot cross the session's gate-in load in
+  ; tiles_left (BIOS work area) or in a register (LoadFiles eats
+  ; them all), so it crosses in BSS; unpb53_shadow_loop picks it
+  ; up after the load.
+  stx shadow_batch_count
+  jmp unpb53_shadow_batch
+.else
   stx tiles_left
   ldx #0
   stx ciBufStart
@@ -436,7 +449,7 @@ tiles_left = 2
   stx ciBufEnd
 loop:
   jsr unpb53_gate
-  
+
   ldx #7
   ldy #1
 shadowcalcloop:
@@ -478,7 +491,74 @@ copyloop:
   dec tiles_left
   bne loop
   rts
+.endif
 .endproc
+
+.ifdef USE_FDS
+.import unpb53_shadow_batch, unpb53_some
+.export unpb53_shadow_loop
+; The decode/transform/copy loop of unpb53_with_shadows, run by the
+; FDS backend inside a single gate session (see fds.s).  Identical
+; to the cartridge loop except it calls unpb53_some directly: the
+; data bank is already switched in for the whole loop.
+.segment "BSS"
+shadow_batch_count: .res 1
+.segment "CODE"
+
+.proc unpb53_shadow_loop
+tiles_left = 2
+  lda shadow_batch_count
+  sta tiles_left
+  ldx #0
+  stx ciBufStart
+  ldx #16
+  stx ciBufEnd
+loop:
+  jsr unpb53_some
+
+  ldx #7
+  ldy #1
+shadowcalcloop:
+  lda #0
+  sta PB53_outbuf+24,x
+  sta PB53_outbuf+40,x
+  sta PB53_outbuf+56,x
+  lda PB53_outbuf+0,x
+  ora PB53_outbuf+8,x
+
+  ; Compute vertical stripes
+  pha
+  and #$AA
+  sta PB53_outbuf+32,x
+  pla
+
+  ; Compute horizontal stripes
+  dey
+  bne :+
+    ldy #2
+    lda #0
+  :
+  sta PB53_outbuf+16,x
+
+  ; Compute diagonal stripes
+  eor PB53_outbuf+32,x
+  sta PB53_outbuf+48,x
+  dex
+  bpl shadowcalcloop
+
+  ; Now copy the tiles to VRAM
+  ldx #0
+copyloop:
+  lda PB53_outbuf,x
+  sta $2007
+  inx
+  cpx #64
+  bcc copyloop
+  dec tiles_left
+  bne loop
+  rts
+.endproc
+.endif
 
 ;;
 ; Draws a rectangular block of 8x8 pixel sprites.
